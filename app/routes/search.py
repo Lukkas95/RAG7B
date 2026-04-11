@@ -13,7 +13,8 @@ async def hybrid_search(req: SearchRequest):
 
     pool = get_pool()
     async with pool.acquire() as conn:
-        if req.section_label is not None:
+        section = req.section_label if req.section_label else None
+        if section is not None:
             rows = await conn.fetch(
                 """
                 SELECT
@@ -34,7 +35,7 @@ async def hybrid_search(req: SearchRequest):
                 LIMIT $6
                 """,
                 query_vec, req.semantic_weight, req.query,
-                req.keyword_weight, req.section_label, req.top_k,
+                req.keyword_weight, section, req.top_k,
             )
         else:
             rows = await conn.fetch(
