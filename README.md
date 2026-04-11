@@ -193,6 +193,6 @@ chunks:    id, document_id, chunk_index, content, section_label, embedding, cont
 
 ## For Teammates
 
-- **Role A (Ingestion)**: Use `POST /documents` + `POST /documents/{id}/chunks` to push parsed papers
-- **Role C (Intelligence)**: Use `POST /search` with section filters + `GET /chunks/{id}/context` for retrieval
-- **Role D (UI)**: Use all endpoints; interactive Swagger docs at `/docs`
+- **Ahreum (Ingestion)**: Use `POST /documents` + `POST /documents/{id}/chunks` to push parsed papers
+- **Yerim (Intelligence)**: Use `POST /search` with section filters + `GET /chunks/{id}/context` for retrieval
+- **Matthias (UI)**: Use all endpoints; interactive Swagger docs at `/docs`
