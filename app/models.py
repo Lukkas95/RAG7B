@@ -6,21 +6,27 @@ from pydantic import BaseModel, Field
 
 # --- Request models ---
 
-class DocumentCreate(BaseModel):
+class ChunkIngest(BaseModel):
+    """Matches the incoming JSON format from Role A."""
+    chunk_id: Optional[str] = None
+    text: str
+    section_title: Optional[str] = None
+    section_type: Optional[str] = None
+    position: int
+    paper_id: str
     title: str
-    authors: Optional[str] = None
     year: Optional[int] = None
-    source: Optional[str] = None
+    authors: List[str] = []
+    venue: Optional[str] = None
+    domain: Optional[str] = None
+    field: Optional[str] = None
+    subfield: Optional[str] = None
+    topics: List[str] = []
+    citations: int = 0
 
 
-class ChunkCreate(BaseModel):
-    chunk_index: int
-    content: str
-    section_label: Optional[str] = None
-
-
-class ChunkBatchCreate(BaseModel):
-    chunks: List[ChunkCreate] = Field(max_length=500)
+class ChunkBatchIngest(BaseModel):
+    chunks: List[ChunkIngest] = Field(max_length=500)
 
 
 class SearchRequest(BaseModel):
@@ -28,37 +34,49 @@ class SearchRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=50)
     semantic_weight: float = Field(default=0.7, ge=0.0, le=1.0)
     keyword_weight: float = Field(default=0.3, ge=0.0, le=1.0)
-    section_label: Optional[str] = None
+    section_type: Optional[str] = None
+    domain: Optional[str] = None
+    field: Optional[str] = None
+    subfield: Optional[str] = None
+    year_min: Optional[int] = None
+    year_max: Optional[int] = None
+    paper_id: Optional[str] = None
+    topic: Optional[str] = None
 
 
 # --- Response models ---
 
-class DocumentResponse(BaseModel):
-    id: int
-    title: str
-    authors: Optional[str]
-    year: Optional[int]
-    source: Optional[str]
-    created_at: datetime
-
-
 class ChunkResponse(BaseModel):
-    id: int
-    document_id: int
-    chunk_index: int
-    content: str
-    section_label: Optional[str]
+    id: str
+    position: int
+    text: str
+    section_title: Optional[str]
+    section_type: Optional[str]
+    paper_id: str
+    title: str
+    year: Optional[int]
+    authors: List[str]
+    venue: Optional[str]
+    domain: Optional[str]
+    field: Optional[str]
+    subfield: Optional[str]
+    topics: List[str]
+    citations: int
     created_at: datetime
 
 
 class SearchResult(BaseModel):
-    chunk_id: int
-    document_id: int
-    chunk_index: int
-    content: str
-    section_label: Optional[str]
+    chunk_id: str
+    position: int
+    text: str
+    section_title: Optional[str]
+    section_type: Optional[str]
+    paper_id: str
+    title: str
+    year: Optional[int]
+    authors: List[str]
+    domain: Optional[str]
     score: float
-    document_title: Optional[str] = None
 
 
 class SearchResponse(BaseModel):

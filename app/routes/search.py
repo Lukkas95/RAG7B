@@ -11,64 +11,85 @@ router = APIRouter(tags=["search"])
 async def hybrid_search(req: SearchRequest):
     query_vec = embed_query(req.query)
 
+    # Build dynamic WHERE clause with parameterized filters
+    # First 4 params are always: query_vec, semantic_weight, query_text, keyword_weight
+    params = [query_vec, req.semantic_weight, req.query, req.keyword_weight]
+    conditions = []
+    idx = 5  # next parameter index
+
+    filters = {
+        "section_type": req.section_type if req.section_type else None,
+        "domain": req.domain if req.domain else None,
+        "field": req.field if req.field else None,
+        "subfield": req.subfield if req.subfield else None,
+        "paper_id": req.paper_id if req.paper_id else None,
+    }
+
+    for col, val in filters.items():
+        if val is not None:
+            conditions.append(f"{col} = ${idx}")
+            params.append(val)
+            idx += 1
+
+    if req.year_min is not None:
+        conditions.append(f"year >= ${idx}")
+        params.append(req.year_min)
+        idx += 1
+
+    if req.year_max is not None:
+        conditions.append(f"year <= ${idx}")
+        params.append(req.year_max)
+        idx += 1
+
+    if req.topic:
+        conditions.append(f"topics @> ARRAY[${idx}]::text[]")
+        params.append(req.topic)
+        idx += 1
+
+    where_clause = " AND ".join(conditions) if conditions else "TRUE"
+
+    params.append(req.top_k)
+    limit_idx = idx
+
+    query = f"""
+        SELECT
+            id AS chunk_id,
+            position,
+            text,
+            section_title,
+            section_type,
+            paper_id,
+            title,
+            year,
+            authors,
+            domain,
+            (
+                (1 - (embedding <=> $1::vector)) * $2
+                + ts_rank(content_tsv, plainto_tsquery('english', $3)) * $4
+            ) AS score
+        FROM chunks
+        WHERE {where_clause}
+        ORDER BY score DESC
+        LIMIT ${limit_idx}
+    """
+
     pool = get_pool()
     async with pool.acquire() as conn:
-        section = req.section_label if req.section_label else None
-        if section is not None:
-            rows = await conn.fetch(
-                """
-                SELECT
-                    c.id AS chunk_id,
-                    c.document_id,
-                    c.chunk_index,
-                    c.content,
-                    c.section_label,
-                    d.title AS document_title,
-                    (
-                        (1 - (c.embedding <=> $1::vector)) * $2
-                        + ts_rank(c.content_tsv, plainto_tsquery('english', $3)) * $4
-                    ) AS score
-                FROM chunks c
-                JOIN documents d ON d.id = c.document_id
-                WHERE c.section_label = $5
-                ORDER BY score DESC
-                LIMIT $6
-                """,
-                query_vec, req.semantic_weight, req.query,
-                req.keyword_weight, section, req.top_k,
-            )
-        else:
-            rows = await conn.fetch(
-                """
-                SELECT
-                    c.id AS chunk_id,
-                    c.document_id,
-                    c.chunk_index,
-                    c.content,
-                    c.section_label,
-                    d.title AS document_title,
-                    (
-                        (1 - (c.embedding <=> $1::vector)) * $2
-                        + ts_rank(c.content_tsv, plainto_tsquery('english', $3)) * $4
-                    ) AS score
-                FROM chunks c
-                JOIN documents d ON d.id = c.document_id
-                ORDER BY score DESC
-                LIMIT $5
-                """,
-                query_vec, req.semantic_weight, req.query,
-                req.keyword_weight, req.top_k,
-            )
+        rows = await conn.fetch(query, *params)
 
     results = [
         SearchResult(
-            chunk_id=r["chunk_id"],
-            document_id=r["document_id"],
-            chunk_index=r["chunk_index"],
-            content=r["content"],
-            section_label=r["section_label"],
+            chunk_id=str(r["chunk_id"]),
+            position=r["position"],
+            text=r["text"],
+            section_title=r["section_title"],
+            section_type=r["section_type"],
+            paper_id=r["paper_id"],
+            title=r["title"],
+            year=r["year"],
+            authors=r["authors"],
+            domain=r["domain"],
             score=float(r["score"]),
-            document_title=r["document_title"],
         )
         for r in rows
     ]

@@ -7,9 +7,10 @@ Built for the RAG course project — Role B (Database & Retrieval Architect).
 ## Features
 
 - **Hybrid Search**: Combines pgvector cosine similarity with PostgreSQL full-text search (`tsvector`/`ts_rank`), with configurable weights
-- **Section Filtering**: Search within specific paper sections (e.g., "Methodology", "Results")
+- **Rich Metadata Filtering**: Filter by section type, domain, field, subfield, year range, paper, or topic
 - **Context Reconstruction**: Retrieve a chunk along with its neighboring chunks for full argument context
-- **Batch Ingestion**: Upload document chunks with automatic embedding computation (server-side)
+- **Batch Ingestion**: Upload chunks with automatic embedding computation (server-side)
+- **Upsert Support**: Re-ingesting the same `chunk_id` updates instead of duplicating
 - **Interactive API Docs**: Auto-generated Swagger UI at `/docs`
 
 ## Tech Stack
@@ -61,52 +62,51 @@ Loads 3,200 Wikipedia passages from the `rag-datasets/rag-mini-wikipedia` Huggin
 
 ## API Reference
 
-### Documents
-
-#### `POST /documents`
-Register a new document.
-
-```json
-{
-  "title": "My Paper",
-  "authors": "Alice, Bob",
-  "year": 2024,
-  "source": "arxiv"
-}
-```
-
-#### `GET /documents`
-List all documents.
-
----
-
 ### Chunks
 
-#### `POST /documents/{document_id}/chunks`
-Ingest text chunks for a document. Embeddings are computed server-side.
+#### `POST /chunks`
+Ingest chunks with paper metadata. Embeddings are computed server-side. Supports upsert (re-ingesting the same `chunk_id` updates the existing row).
 
 ```json
 {
   "chunks": [
-    {"chunk_index": 0, "content": "Introduction text...", "section_label": "Introduction"},
-    {"chunk_index": 1, "content": "Methods text...", "section_label": "Methods"}
+    {
+      "chunk_id": "f18cc432-38e0-448d-acd4-212dd7142410",
+      "text": "Recent studies on vision Transformer...",
+      "section_title": "Introduction",
+      "section_type": "introduction",
+      "position": 0,
+      "paper_id": "https://openalex.org/W3175515048",
+      "title": "PVT v2: Improved baselines with pyramid vision transformer",
+      "year": 2022,
+      "authors": ["Wenhai Wang", "Enze Xie"],
+      "venue": null,
+      "domain": "Physical Sciences",
+      "field": "Computer Science",
+      "subfield": "Computer Vision and Pattern Recognition",
+      "topics": ["Advanced Neural Network Applications"],
+      "citations": 42
+    }
   ]
 }
 ```
 
 - Max 500 chunks per request
-- `section_label` is optional but enables filtered search
+- `chunk_id` is optional (UUID generated server-side if omitted)
 
 #### `GET /chunks/{chunk_id}/context`
-**Context Reconstructor** — returns the target chunk plus its immediate neighbors (chunk_index ± 1).
+**Context Reconstructor** — returns the target chunk plus its immediate neighbors (position +/- 1 within the same paper).
 
 ```json
 {
-  "target": {"id": 2, "content": "...", "section_label": "Methods", ...},
-  "before": {"id": 1, "content": "...", "section_label": "Introduction", ...},
-  "after":  {"id": 3, "content": "...", "section_label": "Results", ...}
+  "target": {"id": "f18c...", "text": "...", "section_type": "introduction", ...},
+  "before": null,
+  "after":  {"id": "a1b2...", "text": "...", "section_type": "methods", ...}
 }
 ```
+
+#### `GET /papers/{paper_id}/chunks`
+List all chunks for a given paper, ordered by position. Useful for reconstructing the full paper view.
 
 ---
 
@@ -117,11 +117,12 @@ Hybrid search combining semantic similarity with keyword matching.
 
 ```json
 {
-  "query": "vector database performance",
+  "query": "vision transformer attention",
   "top_k": 5,
   "semantic_weight": 0.7,
   "keyword_weight": 0.3,
-  "section_label": "Methods"
+  "section_type": "methods",
+  "field": "Computer Science"
 }
 ```
 
@@ -132,21 +133,32 @@ Hybrid search combining semantic similarity with keyword matching.
 | `top_k` | 5 | Number of results (1-50) |
 | `semantic_weight` | 0.7 | Weight for vector similarity |
 | `keyword_weight` | 0.3 | Weight for keyword matching |
-| `section_label` | null | Filter by section (optional) |
+| `section_type` | null | Filter by section type (e.g., "introduction", "methods") |
+| `domain` | null | Filter by domain (e.g., "Physical Sciences") |
+| `field` | null | Filter by field (e.g., "Computer Science") |
+| `subfield` | null | Filter by subfield |
+| `year_min` | null | Filter by minimum year |
+| `year_max` | null | Filter by maximum year |
+| `paper_id` | null | Filter by specific paper |
+| `topic` | null | Filter by topic (matches if topic is in the topics array) |
 
 **Response:**
 ```json
 {
-  "query": "vector database performance",
+  "query": "vision transformer attention",
   "results": [
     {
-      "chunk_id": 42,
-      "document_id": 3,
-      "chunk_index": 5,
-      "content": "pgvector adds vector similarity search...",
-      "section_label": "Methods",
-      "score": 0.47,
-      "document_title": "My Paper"
+      "chunk_id": "f18cc432-38e0-448d-acd4-212dd7142410",
+      "position": 0,
+      "text": "Recent studies on vision Transformer...",
+      "section_title": "Introduction",
+      "section_type": "introduction",
+      "paper_id": "https://openalex.org/W3175515048",
+      "title": "PVT v2: Improved baselines with pyramid vision transformer",
+      "year": 2022,
+      "authors": ["Wenhai Wang", "Enze Xie"],
+      "domain": "Physical Sciences",
+      "score": 0.465
     }
   ]
 }
@@ -161,16 +173,20 @@ Returns `{"status": "ok"}` if the database connection is alive.
 
 ## Database Schema
 
+Single denormalized `chunks` table — each row is one chunk with its paper metadata:
+
 ```
-documents: id, title, authors, year, source, created_at
-chunks:    id, document_id, chunk_index, content, section_label, embedding, content_tsv, created_at
+chunks: id (UUID), position, text, section_title, section_type,
+        paper_id, title, year, authors[], venue, domain, field,
+        subfield, topics[], citations, embedding, content_tsv, created_at
 ```
 
 **Indexes:**
 - HNSW on `embedding` (cosine distance) — fast approximate nearest neighbor
 - GIN on `content_tsv` — full-text search
-- B-tree on `(document_id, chunk_index)` — context reconstruction
-- B-tree on `section_label` — filtered search
+- B-tree on `(paper_id, position)` — context reconstruction
+- B-tree on `section_type`, `domain`, `field`, `subfield`, `year`, `paper_id` — filtered search
+- GIN on `topics` — array containment queries
 
 ## Project Structure
 
@@ -184,7 +200,6 @@ chunks:    id, document_id, chunk_index, content, section_label, embedding, cont
 │   ├── embeddings.py           # sentence-transformer wrapper
 │   ├── models.py               # Pydantic request/response models
 │   └── routes/
-│       ├── documents.py        # document CRUD
 │       ├── chunks.py           # chunk ingestion + context reconstructor
 │       └── search.py           # hybrid search
 └── scripts/
@@ -193,6 +208,6 @@ chunks:    id, document_id, chunk_index, content, section_label, embedding, cont
 
 ## For Teammates
 
-- **Ahreum (Ingestion)**: Use `POST /documents` + `POST /documents/{id}/chunks` to push parsed papers
-- **Yerim (Intelligence)**: Use `POST /search` with section filters + `GET /chunks/{id}/context` for retrieval
+- **Ahreum (Ingestion)**: Use `POST /chunks` to push parsed paper chunks (match the JSON format above)
+- **Yerim (Intelligence)**: Use `POST /search` with filters + `GET /chunks/{id}/context` for retrieval
 - **Matthias (UI)**: Use all endpoints; interactive Swagger docs at `/docs`

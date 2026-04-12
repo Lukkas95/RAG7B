@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from app.db import init_pool, close_pool, get_pool
 from app.embeddings import get_model
-from app.routes import documents, chunks, search
+from app.routes import chunks, search
 
 
 @asynccontextmanager
@@ -21,7 +21,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.include_router(documents.router)
 app.include_router(chunks.router)
 app.include_router(search.router)
 
