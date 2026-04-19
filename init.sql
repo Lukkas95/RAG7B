@@ -9,19 +9,21 @@ CREATE TABLE chunks (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     position        INTEGER NOT NULL,
     text            TEXT NOT NULL,
-    section_title   VARCHAR(255),
-    section_type    VARCHAR(100),
+    section_title   TEXT,
+    section_type    TEXT,
+    section_index   INTEGER,
+    chunk_index     INTEGER,
+    is_abstract     BOOLEAN DEFAULT FALSE,
 
     -- Paper-level metadata (denormalized)
     paper_id        TEXT NOT NULL,
     title           TEXT NOT NULL,
     year            INTEGER,
     authors         TEXT[] NOT NULL DEFAULT '{}',
-    venue           TEXT,
+    doi             TEXT,
     domain          TEXT,
     field           TEXT,
     subfield        TEXT,
-    topics          TEXT[] NOT NULL DEFAULT '{}',
     citations       INTEGER DEFAULT 0,
 
     -- Search infrastructure
@@ -49,9 +51,7 @@ CREATE INDEX idx_chunks_field ON chunks (field);
 CREATE INDEX idx_chunks_subfield ON chunks (subfield);
 CREATE INDEX idx_chunks_year ON chunks (year);
 CREATE INDEX idx_chunks_paper_id ON chunks (paper_id);
-
--- GIN index on topics array for containment queries (@>)
-CREATE INDEX idx_chunks_topics ON chunks USING gin (topics);
+CREATE INDEX idx_chunks_is_abstract ON chunks (is_abstract);
 
 -- Auto-generate tsvector from text on insert/update
 CREATE OR REPLACE FUNCTION chunks_tsv_trigger_fn()

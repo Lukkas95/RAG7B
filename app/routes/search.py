@@ -41,9 +41,9 @@ async def hybrid_search(req: SearchRequest):
         params.append(req.year_max)
         idx += 1
 
-    if req.topic:
-        conditions.append(f"topics @> ARRAY[${idx}]::text[]")
-        params.append(req.topic)
+    if req.is_abstract is not None:
+        conditions.append(f"is_abstract = ${idx}")
+        params.append(req.is_abstract)
         idx += 1
 
     where_clause = " AND ".join(conditions) if conditions else "TRUE"
@@ -58,10 +58,12 @@ async def hybrid_search(req: SearchRequest):
             text,
             section_title,
             section_type,
+            is_abstract,
             paper_id,
             title,
             year,
             authors,
+            doi,
             domain,
             (
                 (1 - (embedding <=> $1::vector)) * $2
@@ -84,10 +86,12 @@ async def hybrid_search(req: SearchRequest):
             text=r["text"],
             section_title=r["section_title"],
             section_type=r["section_type"],
+            is_abstract=r["is_abstract"],
             paper_id=r["paper_id"],
             title=r["title"],
             year=r["year"],
             authors=r["authors"],
+            doi=r["doi"],
             domain=r["domain"],
             score=float(r["score"]),
         )

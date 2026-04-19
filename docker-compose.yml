@@ -9,6 +9,8 @@ services:
       - "5432:5432"
     volumes:
       - ./init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./restore.sh:/docker-entrypoint-initdb.d/02-restore.sh
+      - ./scholargraph_data.sql.gz:/scholargraph_data.sql.gz:ro
       - pgdata:/var/lib/postgresql/data
 
 volumes:
