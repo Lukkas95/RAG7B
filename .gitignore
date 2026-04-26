@@ -26,3 +26,9 @@ pgdata/
 
 # Raw data (loaded via dump)
 chunked_results.jsonl
+
+# Pipeline outputs (per-run reports)
+output/
+
+# Stale empty dump dir (data lives in scholargraph_data.sql.gz)
+scholargraph.dump/

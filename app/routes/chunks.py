@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from app.db import get_pool
 from app.embeddings import embed_texts
 from app.models import ChunkBatchIngest, ChunkResponse, ContextResponse
+from app.retrieval import get_context, get_paper_chunks
 
 router = APIRouter(tags=["chunks"])
 
@@ -77,74 +78,16 @@ async def ingest_chunks(batch: ChunkBatchIngest):
 
 
 @router.get("/chunks/{chunk_id}/context", response_model=ContextResponse)
-async def get_chunk_context(chunk_id: str):
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        target = await conn.fetchrow(
-            "SELECT * FROM chunks WHERE id = $1",
-            uuid.UUID(chunk_id),
-        )
-        if target is None:
-            raise HTTPException(status_code=404, detail="Chunk not found")
-
-        neighbors = await conn.fetch(
-            """
-            SELECT * FROM chunks
-            WHERE paper_id = $1
-              AND position BETWEEN $2 AND $3
-            ORDER BY position
-            """,
-            target["paper_id"],
-            target["position"] - 1,
-            target["position"] + 1,
-        )
-
-    before = None
-    after = None
-    for row in neighbors:
-        if row["position"] == target["position"] - 1:
-            before = _row_to_chunk(row)
-        elif row["position"] == target["position"] + 1:
-            after = _row_to_chunk(row)
-
-    return ContextResponse(
-        target=_row_to_chunk(target),
-        before=before,
-        after=after,
-    )
+async def chunk_context(chunk_id: str):
+    ctx = await get_context(chunk_id)
+    if ctx is None:
+        raise HTTPException(status_code=404, detail="Chunk not found")
+    return ContextResponse(**ctx)
 
 
 @router.get("/papers/{paper_id:path}/chunks", response_model=List[ChunkResponse])
-async def get_paper_chunks(paper_id: str):
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM chunks WHERE paper_id = $1 ORDER BY position",
-            paper_id,
-        )
+async def paper_chunks(paper_id: str):
+    rows = await get_paper_chunks(paper_id)
     if not rows:
         raise HTTPException(status_code=404, detail="No chunks found for this paper")
-    return [_row_to_chunk(r) for r in rows]
-
-
-def _row_to_chunk(row) -> dict:
-    return {
-        "id": str(row["id"]),
-        "position": row["position"],
-        "text": row["text"],
-        "section_title": row["section_title"],
-        "section_type": row["section_type"],
-        "section_index": row["section_index"],
-        "chunk_index": row["chunk_index"],
-        "is_abstract": row["is_abstract"],
-        "paper_id": row["paper_id"],
-        "title": row["title"],
-        "year": row["year"],
-        "authors": row["authors"],
-        "doi": row["doi"],
-        "domain": row["domain"],
-        "field": row["field"],
-        "subfield": row["subfield"],
-        "citations": row["citations"],
-        "created_at": row["created_at"],
-    }
+    return [ChunkResponse(**r) for r in rows]

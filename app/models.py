@@ -94,3 +94,37 @@ class ContextResponse(BaseModel):
     target: ChunkResponse
     before: Optional[ChunkResponse]
     after: Optional[ChunkResponse]
+
+
+class AnalyzeRequest(BaseModel):
+    query: str
+    top_k_per_query: int = Field(default=8, ge=1, le=20)
+
+
+class AnalyzePaperChunk(BaseModel):
+    chunk_id: str
+    section_title: Optional[str]
+    section_type: Optional[str]
+    position: int
+    text: str
+    score: float
+
+
+class AnalyzePaper(BaseModel):
+    paper_id: str
+    title: str
+    year: Optional[int]
+    authors: List[str]
+    doi: Optional[str]
+    domain: Optional[str]
+    field: Optional[str]
+    subfield: Optional[str]
+    citations: int
+    chunks: List[AnalyzePaperChunk]
+
+
+class AnalyzeResponse(BaseModel):
+    query: str
+    expanded_queries: List[str]
+    papers: List[AnalyzePaper]
+    analysis: str

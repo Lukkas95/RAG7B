@@ -1,10 +1,12 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_pool, close_pool, get_pool
 from app.embeddings import get_model
-from app.routes import chunks, search
+from app.routes import analyze, chunks, search
 
 
 @asynccontextmanager
@@ -21,8 +23,24 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS — allow the frontend (on a different port) to call this API.
+# Override via CORS_ORIGINS env var (comma-separated). "*" allows everything.
+_origins_env = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:3000,http://localhost:5173,http://localhost:8080",
+)
+_allow_origins = [o.strip() for o in _origins_env.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allow_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(chunks.router)
 app.include_router(search.router)
+app.include_router(analyze.router)
 
 
 @app.get("/health")

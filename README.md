@@ -175,10 +175,128 @@ Hybrid search combining semantic similarity with keyword matching.
 
 ---
 
+### Analyze (end-to-end pipeline)
+
+#### `POST /analyze`
+Runs the full intelligence pipeline (query expansion → fan-out hybrid search → group-by-paper → gap synthesis) in one call. Slow (depends on the LLM backend; 30–90s with local Ollama+Qwen, faster with Gemini).
+
+```json
+{
+  "query": "vision transformer attention efficiency",
+  "top_k_per_query": 8
+}
+```
+
+**Response:**
+```json
+{
+  "query": "vision transformer attention efficiency",
+  "expanded_queries": ["...", "...", "..."],
+  "papers": [
+    {
+      "paper_id": "https://openalex.org/W...",
+      "title": "...",
+      "year": 2022,
+      "authors": ["..."],
+      "doi": "...",
+      "domain": "Physical Sciences",
+      "field": "Computer Science",
+      "subfield": "...",
+      "citations": 2060,
+      "chunks": [
+        {"chunk_id": "...", "section_title": "Discussion", "section_type": "discussion", "position": 12, "text": "...", "score": 0.47}
+      ]
+    }
+  ],
+  "analysis": "### Per-Paper Limitations & Future Work\n..."
+}
+```
+
+LLM backend / model are controlled by env vars on the server (see [Configuration](#configuration)) — the frontend doesn't pick them.
+
 ### Health
 
 #### `GET /health`
 Returns `{"status": "ok"}` if the database connection is alive.
+
+### CORS
+
+Allowed origins default to `http://localhost:3000`, `http://localhost:5173`, `http://localhost:8080` (covers Next.js, Vite, and common dev servers). Override via env var:
+
+```bash
+export CORS_ORIGINS="http://localhost:3000,https://my-frontend.example.com"
+```
+
+Set `CORS_ORIGINS="*"` to allow any origin (dev only).
+
+## Intelligence Pipeline
+
+Beyond the HTTP API, the package ships an end-to-end RAG reasoning pipeline that queries the database directly (no HTTP hop) and runs LLM-powered query expansion + cross-paper gap synthesis. Originally Role C's responsibility (`ScholarGraph-RAG`); merged in here so the integration is one Python import instead of an HTTP client.
+
+```bash
+# Gemini (default) — set your key in .env or export it
+export GOOGLE_API_KEY=...
+python3 scripts/run_pipeline.py "vision transformer attention efficiency"
+```
+
+The CLI writes a markdown report and a JSON dump under `output/`.
+
+### Switching to a local LLM (Ollama)
+
+For an open-source local model on Apple Silicon:
+
+```bash
+brew install ollama
+
+# Start the daemon — pick one:
+brew services start ollama                # background, restarts at login
+# or, in a dedicated terminal:
+ollama serve                              # foreground on :11434
+
+# Then, with the daemon running:
+ollama pull qwen2.5:7b-instruct          # ~5 GB, one-time
+export LLM_BACKEND=ollama
+python3 scripts/run_pipeline.py "vision transformer attention efficiency"
+```
+
+`qwen2.5:7b-instruct` was chosen for its strong JSON / structured-output behavior — important because the query-expansion step parses a JSON list out of the LLM's response. Llama 3.1 8B Instruct (`llama3.1:8b-instruct`) and Mistral 7B Instruct (`mistral:7b-instruct`) also work.
+
+### Configuration
+
+| Env var | Default | Notes |
+|---------|---------|-------|
+| `LLM_BACKEND` | `gemini` | `gemini` or `ollama` |
+| `LLM_MODEL` | backend-default | e.g. `gemini-flash-latest`, `qwen2.5:7b-instruct` |
+| `GOOGLE_API_KEY` | — | Required when `LLM_BACKEND=gemini` |
+| `OLLAMA_HOST` | `http://localhost:11434` | Used when `LLM_BACKEND=ollama` |
+| `DATABASE_URL` | `postgresql://rag:rag@localhost:5432/scholargraph` | |
+
+See `.env.example`.
+
+### Pipeline stages
+
+1. **Query expansion** (`app/intelligence/workflows.py:expand_query`) — one user query → 3 technical variations (LLM call).
+2. **Retrieval** (`app/retrieval.py:hybrid_search`) — fan out the variants concurrently, biased to analytical sections (`section_type IN ('limitation','discussion','conclusion')`). Falls back to an unfiltered pass if fewer than 3 distinct papers come back.
+3. **Group-by-paper** — chunks are deduped, bucketed under their `paper_id`, and joined with paper metadata.
+4. **Gap synthesis** (`app/intelligence/workflows.py:gap_synthesis`) — single LLM call with strict citation rules; output cites every claim as `[Title (Year), §section_title]`.
+
+Calling from Python directly (no CLI):
+
+```python
+import asyncio
+from app.db import init_pool, close_pool
+from app.intelligence.pipeline import run_pipeline
+
+async def main():
+    await init_pool()
+    try:
+        result = await run_pipeline("graph neural networks for citation prediction")
+        print(result["analysis"])
+    finally:
+        await close_pool()
+
+asyncio.run(main())
+```
 
 ## Database Schema
 
@@ -203,21 +321,29 @@ chunks: id (UUID), position, text, section_title, section_type,
 ├── docker-compose.yml          # pgvector PostgreSQL
 ├── init.sql                    # schema, indexes, triggers
 ├── requirements.txt
+├── .env.example                # configuration reference
 ├── app/
 │   ├── main.py                 # FastAPI app + lifespan
 │   ├── db.py                   # asyncpg connection pool
 │   ├── embeddings.py           # sentence-transformer wrapper
 │   ├── models.py               # Pydantic request/response models
-│   └── routes/
-│       ├── chunks.py           # chunk ingestion + context reconstructor
-│       └── search.py           # hybrid search
+│   ├── retrieval.py            # pure-Python search + context (no FastAPI)
+│   ├── routes/
+│   │   ├── chunks.py           # ingest + thin wrappers around retrieval.py
+│   │   └── search.py           # thin wrapper around retrieval.hybrid_search
+│   └── intelligence/
+│       ├── prompts.py          # expansion + gap-synthesis templates
+│       ├── llm.py              # pluggable backend (Gemini / Ollama)
+│       ├── workflows.py        # expand_query, gap_synthesis
+│       └── pipeline.py         # end-to-end orchestrator
 └── scripts/
     ├── load_jsonl.py           # load JSONL from Role A's pipeline
-    └── load_demo_data.py       # demo data loader (Wikipedia)
+    ├── load_demo_data.py       # demo data loader (Wikipedia)
+    └── run_pipeline.py         # CLI for the intelligence pipeline
 ```
 
 ## For Teammates
 
 - **Ahreum (Ingestion)**: Run `python3 scripts/load_jsonl.py chunked_results.jsonl` to load your data, or use `POST /chunks` directly
-- **Yerim (Intelligence)**: Use `POST /search` with filters + `GET /chunks/{id}/context` for retrieval
-- **Matthias (UI)**: Use all endpoints; interactive Swagger docs at `/docs`
+- **Yerim (Intelligence)**: Your `expand_query_workflow` + `gap_synthesis_workflow` are now ported into `app/intelligence/`. Either run `scripts/run_pipeline.py "..."` or `from app.intelligence.pipeline import run_pipeline` — no HTTP needed.
+- **Matthias (UI)**: One endpoint covers the full flow — `POST /analyze` with `{"query": "..."}` returns expanded queries, retrieved papers (with chunks), and the gap-synthesis analysis. Use `POST /search` if you want raw retrieval without the LLM step. Swagger UI at `/docs`. CORS pre-configured for ports 3000 / 5173 / 8080; override with `CORS_ORIGINS` env var.
