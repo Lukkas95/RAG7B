@@ -101,6 +101,7 @@ def _group_by_paper(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "year": c["year"],
                 "authors": c["authors"],
                 "doi": c["doi"],
+                "pdf_url": c["pdf_url"],
                 "domain": c["domain"],
                 "field": c["field"],
                 "subfield": c["subfield"],

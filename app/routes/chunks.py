@@ -25,15 +25,15 @@ async def ingest_chunks(batch: ChunkBatchIngest):
                 INSERT INTO chunks (
                     id, position, text, section_title, section_type,
                     section_index, chunk_index, is_abstract,
-                    paper_id, title, year, authors, doi,
+                    paper_id, title, year, authors, doi, pdf_url,
                     domain, field, subfield, citations,
                     embedding
                 ) VALUES (
                     $1, $2, $3, $4, $5,
                     $6, $7, $8,
-                    $9, $10, $11, $12, $13,
-                    $14, $15, $16, $17,
-                    $18
+                    $9, $10, $11, $12, $13, $14,
+                    $15, $16, $17, $18,
+                    $19
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     position = EXCLUDED.position,
@@ -48,6 +48,7 @@ async def ingest_chunks(batch: ChunkBatchIngest):
                     year = EXCLUDED.year,
                     authors = EXCLUDED.authors,
                     doi = EXCLUDED.doi,
+                    pdf_url = EXCLUDED.pdf_url,
                     domain = EXCLUDED.domain,
                     field = EXCLUDED.field,
                     subfield = EXCLUDED.subfield,
@@ -67,6 +68,7 @@ async def ingest_chunks(batch: ChunkBatchIngest):
                 chunk.year,
                 chunk.authors,
                 chunk.doi,
+                chunk.pdf_url,
                 chunk.domain,
                 chunk.field,
                 chunk.subfield,

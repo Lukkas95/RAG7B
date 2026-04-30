@@ -53,6 +53,7 @@ def _format_paper(paper: dict[str, Any]) -> str:
         f"# {title} ({year})\n"
         f"  Authors: {authors_str or 'unknown'}\n"
         f"  Field: {field} | Citations: {citations} | DOI: {doi}\n"
+        f"  PDF: {paper.get('pdf_url') or 'n/a'}\n"
         f"  Chunks ({len(paper.get('chunks', []))}):"
     )
     chunk_blocks = []

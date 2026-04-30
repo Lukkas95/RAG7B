@@ -25,7 +25,7 @@ pgdata/
 .cache/
 
 # Raw data (loaded via dump)
-chunked_results.jsonl
+chunked_results*.jsonl
 
 # Pipeline outputs (per-run reports)
 output/

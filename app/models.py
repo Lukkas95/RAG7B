@@ -21,6 +21,7 @@ class ChunkIngest(BaseModel):
     year: Optional[int] = None
     authors: List[str] = []
     doi: Optional[str] = None
+    pdf_url: Optional[str] = None
     domain: Optional[str] = None
     field: Optional[str] = None
     subfield: Optional[str] = None
@@ -62,6 +63,7 @@ class ChunkResponse(BaseModel):
     year: Optional[int]
     authors: List[str]
     doi: Optional[str]
+    pdf_url: Optional[str]
     domain: Optional[str]
     field: Optional[str]
     subfield: Optional[str]
@@ -81,6 +83,7 @@ class SearchResult(BaseModel):
     year: Optional[int]
     authors: List[str]
     doi: Optional[str]
+    pdf_url: Optional[str]
     domain: Optional[str]
     score: float
 
@@ -116,6 +119,7 @@ class AnalyzePaper(BaseModel):
     year: Optional[int]
     authors: List[str]
     doi: Optional[str]
+    pdf_url: Optional[str]
     domain: Optional[str]
     field: Optional[str]
     subfield: Optional[str]

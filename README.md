@@ -55,7 +55,7 @@ The first startup downloads the embedding model (~80MB). Once ready, visit:
 ### 4. Load data
 
 ```bash
-python3 scripts/load_jsonl.py chunked_results.jsonl
+python3 scripts/load_jsonl.py chunked_results_v2.jsonl
 ```
 
 Loads the JSONL file produced by Role A's pipeline. Data persists in the Docker volume — you only need to run this once.
@@ -89,6 +89,7 @@ Ingest chunks with paper metadata. Embeddings are computed server-side. Supports
       "year": 2022,
       "authors": ["Wenhai Wang", "Enze Xie"],
       "doi": "https://doi.org/10.1007/s41095-022-0274-8",
+      "pdf_url": "https://arxiv.org/pdf/2106.13797",
       "domain": "Physical Sciences",
       "field": "Computer Science",
       "subfield": "Computer Vision and Pattern Recognition",
@@ -166,6 +167,7 @@ Hybrid search combining semantic similarity with keyword matching.
       "year": 2022,
       "authors": ["Wenhai Wang", "Enze Xie"],
       "doi": "https://doi.org/10.1007/s41095-022-0274-8",
+      "pdf_url": "https://arxiv.org/pdf/2106.13797",
       "domain": "Physical Sciences",
       "score": 0.465
     }
@@ -199,6 +201,7 @@ Runs the full intelligence pipeline (query expansion → fan-out hybrid search �
       "year": 2022,
       "authors": ["..."],
       "doi": "...",
+      "pdf_url": "https://arxiv.org/pdf/...",
       "domain": "Physical Sciences",
       "field": "Computer Science",
       "subfield": "...",
@@ -305,7 +308,7 @@ Single denormalized `chunks` table — each row is one chunk with its paper meta
 ```
 chunks: id (UUID), position, text, section_title, section_type,
         section_index, chunk_index, is_abstract,
-        paper_id, title, year, authors[], doi, domain, field,
+        paper_id, title, year, authors[], doi, pdf_url, domain, field,
         subfield, citations, embedding, content_tsv, created_at
 ```
 

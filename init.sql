@@ -21,6 +21,7 @@ CREATE TABLE chunks (
     year            INTEGER,
     authors         TEXT[] NOT NULL DEFAULT '{}',
     doi             TEXT,
+    pdf_url         TEXT,
     domain          TEXT,
     field           TEXT,
     subfield        TEXT,
