@@ -7,6 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db import init_pool, close_pool, get_pool
 from app.embeddings import get_model
 from app.routes import analyze, chunks, search
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv()
 
 
 @asynccontextmanager

@@ -4,6 +4,7 @@ Chosen via env var `LLM_BACKEND` (default `gemini`):
   - `gemini` — Google `google.genai` SDK; requires `GOOGLE_API_KEY`.
   - `ollama` — local Ollama server at `OLLAMA_HOST` (default
     http://localhost:11434). Run `ollama pull <model>` first.
+  - `openrouter` — OpenRouter Python SDK; requires `OPENROUTER_API_KEY`.
 
 Override the model id via `LLM_MODEL`.
 """
@@ -20,7 +21,11 @@ def _backend() -> str:
 
 def _model_id() -> str:
     backend = _backend()
-    default = "gemini-flash-latest" if backend == "gemini" else "qwen2.5:7b-instruct"
+    default = {
+        "gemini": "gemini-flash-latest",
+        "ollama": "qwen2.5:7b-instruct",
+        "openrouter": "qwen/qwen-2.5-7b-instruct",
+    }.get(backend, "gemini-flash-latest")
     return os.getenv("LLM_MODEL", default)
 
 
@@ -30,7 +35,8 @@ def _gemini_client():
 
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
-        raise RuntimeError("GOOGLE_API_KEY not set (required for LLM_BACKEND=gemini)")
+        raise RuntimeError(
+            "GOOGLE_API_KEY not set (required for LLM_BACKEND=gemini)")
     return genai.Client(api_key=api_key)
 
 
@@ -57,14 +63,41 @@ async def _complete_ollama(prompt: str) -> str:
         return r.json()["response"]
 
 
+async def _complete_openrouter(prompt: str) -> str:
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "OPENROUTER_API_KEY not set (required for LLM_BACKEND=openrouter)")
+
+    model = _model_id()
+
+    # imported lazily so non-openrouter users don't need it
+    from openrouter import OpenRouter
+
+    def _call() -> str:
+        with OpenRouter(api_key=api_key) as client:
+            response = client.chat.send(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response.choices[0].message.content
+
+    return await asyncio.to_thread(_call)
+
+
 async def complete(prompt: str) -> str:
     """Run a single-turn completion through the configured backend."""
     backend = _backend()
+    print(f"Completing with {describe_backend()}...")
     if backend == "gemini":
         return await _complete_gemini(prompt)
     if backend == "ollama":
         return await _complete_ollama(prompt)
-    raise ValueError(f"Unknown LLM_BACKEND: {backend!r} (expected 'gemini' or 'ollama')")
+    if backend == "openrouter":
+        return await _complete_openrouter(prompt)
+    raise ValueError(
+        f"Unknown LLM_BACKEND: {backend!r} (expected 'gemini', 'ollama', or 'openrouter')"
+    )
 
 
 def describe_backend() -> str:

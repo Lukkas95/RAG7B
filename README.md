@@ -25,6 +25,7 @@ Built for the RAG course project — Role B (Database & Retrieval Architect).
 
 - Docker & Docker Compose
 - Python 3.9+
+- Git LFS (for large demo data, optional): https://docs.github.com/en/repositories/working-with-files/managing-large-files/installing-git-large-file-storage
 
 ### 1. Start the database
 
@@ -49,6 +50,7 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 The first startup downloads the embedding model (~80MB). Once ready, visit:
+
 - **API**: http://localhost:8000
 - **Interactive docs**: http://localhost:8000/docs
 
@@ -61,6 +63,7 @@ python3 scripts/load_jsonl.py chunked_results_v2.jsonl
 Loads the JSONL file produced by Role A's pipeline. Data persists in the Docker volume — you only need to run this once.
 
 For the demo dataset (optional):
+
 ```bash
 python3 scripts/load_demo_data.py
 ```
@@ -70,6 +73,7 @@ python3 scripts/load_demo_data.py
 ### Chunks
 
 #### `POST /chunks`
+
 Ingest chunks with paper metadata. Embeddings are computed server-side. Supports upsert (re-ingesting the same `chunk_id` updates the existing row).
 
 ```json
@@ -103,6 +107,7 @@ Ingest chunks with paper metadata. Embeddings are computed server-side. Supports
 - `chunk_id` is optional (UUID generated server-side if omitted)
 
 #### `GET /chunks/{chunk_id}/context`
+
 **Context Reconstructor** — returns the target chunk plus its immediate neighbors (position +/- 1 within the same paper).
 
 ```json
@@ -114,6 +119,7 @@ Ingest chunks with paper metadata. Embeddings are computed server-side. Supports
 ```
 
 #### `GET /papers/{paper_id}/chunks`
+
 List all chunks for a given paper, ordered by position.
 
 ---
@@ -121,6 +127,7 @@ List all chunks for a given paper, ordered by position.
 ### Search
 
 #### `POST /search`
+
 Hybrid search combining semantic similarity with keyword matching.
 
 ```json
@@ -151,6 +158,7 @@ Hybrid search combining semantic similarity with keyword matching.
 | `is_abstract` | null | Filter abstract-only chunks (true/false) |
 
 **Response:**
+
 ```json
 {
   "query": "vision transformer attention",
@@ -180,6 +188,7 @@ Hybrid search combining semantic similarity with keyword matching.
 ### Analyze (end-to-end pipeline)
 
 #### `POST /analyze`
+
 Runs the full intelligence pipeline (query expansion → fan-out hybrid search → group-by-paper → gap synthesis) in one call. Slow (depends on the LLM backend; 30–90s with local Ollama+Qwen, faster with Gemini).
 
 ```json
@@ -190,6 +199,7 @@ Runs the full intelligence pipeline (query expansion → fan-out hybrid search �
 ```
 
 **Response:**
+
 ```json
 {
   "query": "vision transformer attention efficiency",
@@ -207,7 +217,14 @@ Runs the full intelligence pipeline (query expansion → fan-out hybrid search �
       "subfield": "...",
       "citations": 2060,
       "chunks": [
-        {"chunk_id": "...", "section_title": "Discussion", "section_type": "discussion", "position": 12, "text": "...", "score": 0.47}
+        {
+          "chunk_id": "...",
+          "section_title": "Discussion",
+          "section_type": "discussion",
+          "position": 12,
+          "text": "...",
+          "score": 0.47
+        }
       ]
     }
   ],
@@ -220,6 +237,7 @@ LLM backend / model are controlled by env vars on the server (see [Configuration
 ### Health
 
 #### `GET /health`
+
 Returns `{"status": "ok"}` if the database connection is alive.
 
 ### CORS
@@ -266,13 +284,13 @@ python3 scripts/run_pipeline.py "vision transformer attention efficiency"
 
 ### Configuration
 
-| Env var | Default | Notes |
-|---------|---------|-------|
-| `LLM_BACKEND` | `gemini` | `gemini` or `ollama` |
-| `LLM_MODEL` | backend-default | e.g. `gemini-flash-latest`, `qwen2.5:7b-instruct` |
-| `GOOGLE_API_KEY` | — | Required when `LLM_BACKEND=gemini` |
-| `OLLAMA_HOST` | `http://localhost:11434` | Used when `LLM_BACKEND=ollama` |
-| `DATABASE_URL` | `postgresql://rag:rag@localhost:5432/scholargraph` | |
+| Env var          | Default                                            | Notes                                             |
+| ---------------- | -------------------------------------------------- | ------------------------------------------------- |
+| `LLM_BACKEND`    | `gemini`                                           | `gemini` or `ollama`                              |
+| `LLM_MODEL`      | backend-default                                    | e.g. `gemini-flash-latest`, `qwen2.5:7b-instruct` |
+| `GOOGLE_API_KEY` | —                                                  | Required when `LLM_BACKEND=gemini`                |
+| `OLLAMA_HOST`    | `http://localhost:11434`                           | Used when `LLM_BACKEND=ollama`                    |
+| `DATABASE_URL`   | `postgresql://rag:rag@localhost:5432/scholargraph` |                                                   |
 
 See `.env.example`.
 
@@ -313,6 +331,7 @@ chunks: id (UUID), position, text, section_title, section_type,
 ```
 
 **Indexes:**
+
 - HNSW on `embedding` (cosine distance) — fast approximate nearest neighbor
 - GIN on `content_tsv` — full-text search
 - B-tree on `(paper_id, position)` — context reconstruction

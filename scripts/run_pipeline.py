@@ -4,10 +4,11 @@ Usage:
     python3 scripts/run_pipeline.py "your question"
 
 Env vars:
-    LLM_BACKEND     gemini (default) | ollama
+    LLM_BACKEND     gemini (default) | ollama | openrouter
     LLM_MODEL       overrides default model id for the chosen backend
     GOOGLE_API_KEY  required if LLM_BACKEND=gemini
     OLLAMA_HOST     default http://localhost:11434
+    OPENROUTER_API_KEY required if LLM_BACKEND=openrouter
     DATABASE_URL    default postgresql://rag:rag@localhost:5432/scholargraph
 """
 import argparse
