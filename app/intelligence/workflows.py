@@ -1,7 +1,8 @@
-"""Reasoning workflows: query expansion + gap synthesis.
+"""Reasoning workflows: query expansion + the three button-triggered syntheses.
 
-Both call into `app.intelligence.llm.complete()`, so they're agnostic to which
-LLM backend is configured.
+All call into `app.intelligence.llm.complete()`, so they're agnostic to which
+LLM backend is configured. Each synthesis takes the same per-paper input shape
+(produced by `pipeline._group_by_paper`) and returns a string analysis.
 """
 import json
 import re
@@ -11,6 +12,8 @@ from app.intelligence.llm import complete
 from app.intelligence.prompts import (
     EXPANSION_PROMPT_TEMPLATE,
     GAP_SYNTHESIS_PROMPT_TEMPLATE,
+    METHODOLOGY_SYNTHESIS_PROMPT_TEMPLATE,
+    TOC_SYNTHESIS_PROMPT_TEMPLATE,
 )
 
 
@@ -30,13 +33,31 @@ async def expand_query(user_query: str) -> list[str]:
 
 
 async def gap_synthesis(papers: list[dict[str, Any]]) -> str:
-    """Cross-paper analysis. Each entry in `papers` must carry at minimum
-    `title`, `year`, and `chunks` (a list of dicts with `section_title`,
-    `section_type`, `position`, `text`)."""
+    """Cross-paper limitations / future-work / silence analysis."""
+    return await _synthesize(papers, GAP_SYNTHESIS_PROMPT_TEMPLATE)
+
+
+async def toc_synthesis(papers: list[dict[str, Any]]) -> str:
+    """Hierarchical Table-of-Contents for a discussion synthesizing the papers."""
+    return await _synthesize(papers, TOC_SYNTHESIS_PROMPT_TEMPLATE)
+
+
+async def methodology_synthesis(papers: list[dict[str, Any]]) -> str:
+    """Per-paper methodology profile + cross-paper comparative matrix."""
+    return await _synthesize(papers, METHODOLOGY_SYNTHESIS_PROMPT_TEMPLATE)
+
+
+async def _synthesize(papers: list[dict[str, Any]], template: str) -> str:
+    """Shared body of all three synthesis workflows: format papers into the
+    [Context Data] block, fill the template, run a single `complete()` call.
+
+    Each entry in `papers` must carry at minimum `title`, `year`, and `chunks`
+    (a list of dicts with `section_title`, `section_type`, `position`, `text`).
+    """
     if not papers:
         return "Information not available in the provided sources."
     context = "\n\n---\n\n".join(_format_paper(p) for p in papers)
-    prompt = GAP_SYNTHESIS_PROMPT_TEMPLATE.format(context_data=context)
+    prompt = template.format(context_data=context)
     return await complete(prompt)
 
 

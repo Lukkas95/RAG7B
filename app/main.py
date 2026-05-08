@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_pool, close_pool, get_pool
 from app.embeddings import get_model
-from app.routes import analyze, chunks, search
+from app.routes import analyze, chat, chunks, search
 from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv()
@@ -44,6 +44,7 @@ app.add_middleware(
 app.include_router(chunks.router)
 app.include_router(search.router)
 app.include_router(analyze.router)
+app.include_router(chat.router)
 
 
 @app.get("/health")

@@ -1,44 +1,66 @@
-"""End-to-end intelligence pipeline.
+"""End-to-end intelligence pipelines.
+
+Three orchestrators — gaps, ToC, methodologies — share the same preamble:
 
   user query
     -> expand_query()                                 (LLM)
-    -> hybrid_search per variant, biased to analytical sections   (DB)
+    -> hybrid_search per variant, biased to the pipeline's analytical sections   (DB)
     -> fallback unfiltered pass if too few distinct papers found
     -> group chunks by paper, attach paper metadata
-    -> gap_synthesis()                                (LLM)
+
+…and differ only in (a) which `section_types` filter the retrieval uses and
+(b) which synthesis workflow they hand the grouped papers to. The shared
+preamble lives in `_collect_papers`; each `run_*_pipeline` wrapper is a few
+lines on top.
+
+`run_pipeline` is kept as a back-compat alias for `run_gaps_pipeline` so
+`scripts/run_pipeline.py` keeps working unchanged.
 """
-from typing import Any
+from typing import Any, Awaitable, Callable, Optional
 
 import asyncio
 
 from app.intelligence.llm import describe_backend
-from app.intelligence.workflows import expand_query, gap_synthesis
+from app.intelligence.workflows import (
+    expand_query,
+    gap_synthesis,
+    methodology_synthesis,
+    toc_synthesis,
+)
 from app.retrieval import hybrid_search
 
-# Sections that tend to carry critical analysis / limitations / future work.
-ANALYTICAL_SECTION_TYPES = ["limitation", "discussion", "conclusion"]
+# Section-type filters per pipeline.
+GAPS_SECTION_TYPES: list[str] = ["limitation", "discussion", "conclusion"]
+TOC_SECTION_TYPES: Optional[list[str]] = None  # unfiltered — outline needs all sections
+METHODOLOGY_SECTION_TYPES: list[str] = ["method", "result"]
+
+# Back-compat: older code may still import this name.
+ANALYTICAL_SECTION_TYPES = GAPS_SECTION_TYPES
 
 
-async def run_pipeline(
+async def _collect_papers(
     user_query: str,
     *,
-    top_k_per_query: int = 8,
-    min_distinct_papers: int = 3,
-    verbose: bool = True,
-) -> dict[str, Any]:
-    log = print if verbose else (lambda *a, **k: None)
-    log(f"[pipeline] backend={describe_backend()} | query={user_query!r}")
+    top_k_per_query: int,
+    min_distinct_papers: int,
+    section_types: Optional[list[str]],
+    log,
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Shared preamble for all three pipelines:
 
+      expand_query → fan-out hybrid_search(section_types=…) → dedupe →
+      fallback unfiltered if <min_distinct_papers → group_by_paper.
+
+    Returns (expanded_queries, papers).
+    """
     log("[pipeline] expanding query...")
     expanded = await expand_query(user_query)
     log(f"[pipeline] {len(expanded)} expanded queries: {expanded}")
 
-    log(f"[pipeline] retrieving (filtered to {ANALYTICAL_SECTION_TYPES})...")
+    log(f"[pipeline] retrieving (filtered to {section_types})...")
     chunk_lists = await asyncio.gather(
         *[
-            hybrid_search(
-                q, top_k=top_k_per_query, section_types=ANALYTICAL_SECTION_TYPES
-            )
+            hybrid_search(q, top_k=top_k_per_query, section_types=section_types)
             for q in expanded
         ]
     )
@@ -63,10 +85,34 @@ async def run_pipeline(
         )
 
     papers = _group_by_paper(chunks)
-    log(f"[pipeline] grouped into {len(papers)} papers; calling synthesis LLM...")
+    log(f"[pipeline] grouped into {len(papers)} papers")
+    return expanded, papers
 
-    analysis = await gap_synthesis(papers)
-    log("[pipeline] done.")
+
+async def _run(
+    user_query: str,
+    *,
+    section_types: Optional[list[str]],
+    synthesizer: Callable[[list[dict[str, Any]]], Awaitable[str]],
+    pipeline_label: str,
+    top_k_per_query: int,
+    min_distinct_papers: int,
+    verbose: bool,
+) -> dict[str, Any]:
+    log = print if verbose else (lambda *a, **k: None)
+    log(f"[pipeline:{pipeline_label}] backend={describe_backend()} | query={user_query!r}")
+
+    expanded, papers = await _collect_papers(
+        user_query,
+        top_k_per_query=top_k_per_query,
+        min_distinct_papers=min_distinct_papers,
+        section_types=section_types,
+        log=log,
+    )
+
+    log(f"[pipeline:{pipeline_label}] calling synthesis LLM...")
+    analysis = await synthesizer(papers)
+    log(f"[pipeline:{pipeline_label}] done.")
 
     return {
         "query": user_query,
@@ -74,6 +120,68 @@ async def run_pipeline(
         "papers": papers,
         "analysis": analysis,
     }
+
+
+async def run_gaps_pipeline(
+    user_query: str,
+    *,
+    top_k_per_query: int = 8,
+    min_distinct_papers: int = 3,
+    verbose: bool = True,
+) -> dict[str, Any]:
+    """Cross-paper limitations / future-work / research-silence analysis."""
+    return await _run(
+        user_query,
+        section_types=GAPS_SECTION_TYPES,
+        synthesizer=gap_synthesis,
+        pipeline_label="gaps",
+        top_k_per_query=top_k_per_query,
+        min_distinct_papers=min_distinct_papers,
+        verbose=verbose,
+    )
+
+
+async def run_toc_pipeline(
+    user_query: str,
+    *,
+    top_k_per_query: int = 8,
+    min_distinct_papers: int = 3,
+    verbose: bool = True,
+) -> dict[str, Any]:
+    """Hierarchical Table-of-Contents for a discussion across the papers."""
+    return await _run(
+        user_query,
+        section_types=TOC_SECTION_TYPES,
+        synthesizer=toc_synthesis,
+        pipeline_label="toc",
+        top_k_per_query=top_k_per_query,
+        min_distinct_papers=min_distinct_papers,
+        verbose=verbose,
+    )
+
+
+async def run_methodologies_pipeline(
+    user_query: str,
+    *,
+    top_k_per_query: int = 8,
+    min_distinct_papers: int = 3,
+    verbose: bool = True,
+) -> dict[str, Any]:
+    """Per-paper methodology profile + cross-paper comparative matrix."""
+    return await _run(
+        user_query,
+        section_types=METHODOLOGY_SECTION_TYPES,
+        synthesizer=methodology_synthesis,
+        pipeline_label="methodologies",
+        top_k_per_query=top_k_per_query,
+        min_distinct_papers=min_distinct_papers,
+        verbose=verbose,
+    )
+
+
+# Back-compat alias — older callers (e.g. `scripts/run_pipeline.py`) still
+# import `run_pipeline`.
+run_pipeline = run_gaps_pipeline
 
 
 def _dedupe_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
