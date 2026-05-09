@@ -118,6 +118,12 @@ Ingest chunks with paper metadata. Embeddings are computed server-side. Supports
 }
 ```
 
+#### `GET /chunks/{chunk_id}/pdf`
+
+PDF proxy endpoint — fetches the chunk's `pdf_url` server-side and returns it as an inline PDF response.
+
+The frontend should use this endpoint for PDF preview. If it fails (for 62 papers), fall back to opening the original `pdf_url` or DOI in a new tab.
+
 #### `GET /papers/{paper_id}/chunks`
 
 List all chunks for a given paper, ordered by position.
