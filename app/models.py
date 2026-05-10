@@ -111,6 +111,7 @@ class AnalyzePaperChunk(BaseModel):
     position: int
     text: str
     score: float
+    pdf: Optional[str]
 
 
 class AnalyzePaper(BaseModel):
