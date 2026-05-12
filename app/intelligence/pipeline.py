@@ -16,6 +16,7 @@ lines on top.
 `run_pipeline` is kept as a back-compat alias for `run_gaps_pipeline` so
 `scripts/run_pipeline.py` keeps working unchanged.
 """
+import os
 from typing import Any, Awaitable, Callable, Optional
 
 import asyncio
@@ -29,9 +30,12 @@ from app.intelligence.workflows import (
 )
 from app.retrieval import hybrid_search
 
+SERVER_URL = os.getenv("SERVER_URL", "http://localhost:8000").rstrip("/")
+
 # Section-type filters per pipeline.
 GAPS_SECTION_TYPES: list[str] = ["limitation", "discussion", "conclusion"]
-TOC_SECTION_TYPES: Optional[list[str]] = None  # unfiltered — outline needs all sections
+# unfiltered — outline needs all sections
+TOC_SECTION_TYPES: Optional[list[str]] = None
 METHODOLOGY_SECTION_TYPES: list[str] = ["method", "result"]
 
 # Back-compat: older code may still import this name.
@@ -60,7 +64,8 @@ async def _collect_papers(
     log(f"[pipeline] retrieving (filtered to {section_types})...")
     chunk_lists = await asyncio.gather(
         *[
-            hybrid_search(q, top_k=top_k_per_query, section_types=section_types)
+            hybrid_search(q, top_k=top_k_per_query,
+                          section_types=section_types)
             for q in expanded
         ]
     )
@@ -78,7 +83,8 @@ async def _collect_papers(
         fallback_lists = await asyncio.gather(
             *[hybrid_search(q, top_k=top_k_per_query) for q in expanded]
         )
-        chunks = _dedupe_chunks(chunks + [c for lst in fallback_lists for c in lst])
+        chunks = _dedupe_chunks(
+            chunks + [c for lst in fallback_lists for c in lst])
         log(
             f"[pipeline] after fallback: {len(chunks)} chunks across "
             f"{len({c['paper_id'] for c in chunks})} papers"
@@ -220,6 +226,7 @@ def _group_by_paper(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         buckets[pid]["chunks"].append(
             {
                 "chunk_id": c["chunk_id"],
+                "pdf": f"{SERVER_URL}/chunks/{c['chunk_id']}/pdf",
                 "section_title": c["section_title"],
                 "section_type": c["section_type"],
                 "position": c["position"],
@@ -230,7 +237,8 @@ def _group_by_paper(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if c["score"] > buckets[pid]["_best_score"]:
             buckets[pid]["_best_score"] = c["score"]
 
-    papers = sorted(buckets.values(), key=lambda p: p["_best_score"], reverse=True)
+    papers = sorted(buckets.values(),
+                    key=lambda p: p["_best_score"], reverse=True)
     for p in papers:
         p["chunks"].sort(key=lambda c: c["score"], reverse=True)
         p.pop("_best_score", None)
