@@ -105,6 +105,11 @@ Then produce `search_query` — a self-contained query string that a downstream 
 - Keep technical vocabulary verbatim — do not translate jargon to plain English.
 - Output a noun phrase or short declarative sentence (8-25 words) — not a question.
 - For pipeline="text", the search_query is unused downstream; still produce a sensible value (the user's last message verbatim is fine).
+- Topic Shift Detection: Before rewriting, evaluate if the user's latest message represents a significant departure from the previous technical topic.
+- Context Discarding: If a Topic Shift is detected (e.g., changing from "Transformer" to "NFT"), DISCARD all keywords from the previous conversation turns. The resulting 'search_query' must be 100% standalone and contain ONLY keywords relevant to the new topic.
+- Pronoun Dependency: Only inherit topics if the user uses explicit markers like pronouns ("it", "they", "those") or follow-up phrases ("how about...", "and the..."). If the user mentions a new specific entity or technology, treat it as a fresh start.
+- Hallucination Prevention (Query Level): The 'search_query' must only include technical terms explicitly mentioned or logically implied by the user's current intent. Do not invent or add technical jargon that was not present in the provided conversation history.
+- Safety Fallback: If the user's intent is a general greeting or a broad conceptual question that does not require cross-paper analysis, select pipeline="text" to prevent generating a hallucinated research gap report.
 
 Output exactly one valid JSON object with TWO fields and nothing else:
 {{"pipeline": "<one of: gaps | toc | methodologies | text>", "search_query": "<rewritten query>"}}
