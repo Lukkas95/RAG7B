@@ -193,16 +193,17 @@ Hybrid search combining semantic similarity with keyword matching.
 
 ### Analyze (button-triggered pipelines)
 
-Three end-to-end pipelines, one per frontend button. All three share the same request/response shape (`AnalyzeRequest` / `AnalyzeResponse`) and the same preamble (query expansion → fan-out hybrid search → group-by-paper); they differ in (a) which `section_type` filter retrieval uses and (b) which prompt template the LLM synthesis call uses. Slow (depends on the LLM backend; 30–90s with local Ollama+Qwen, faster with Gemini / OpenRouter).
+Four end-to-end pipelines. All share the same request/response shape (`AnalyzeRequest` / `AnalyzeResponse`) and the same preamble (query expansion → fan-out hybrid search → group-by-paper); they differ in (a) which `section_type` filter retrieval uses, (b) which expander prompt the LLM uses, and (c) which synthesis template runs. Slow (depends on the LLM backend; 30–90s with local Ollama+Qwen, faster with Gemini / OpenRouter).
 
-| Endpoint | Pipeline | Section filter | Frontend button |
-|----------|----------|----------------|-----------------|
-| `POST /analyze/gaps` | Gap synthesis — limitations, contradictions, research silences | `limitation`, `discussion`, `conclusion` | "Find Research Gaps" |
-| `POST /analyze/toc` | Discussion ToC — hierarchical outline across papers | (unfiltered — needs all sections) | "Generate Discussion ToC" |
-| `POST /analyze/methodologies` | Methodology synthesis — per-paper profiles + comparative matrix | `method`, `result` | "Synthesize Methodologies" |
-| `POST /analyze` | Deprecated alias → `/analyze/gaps` | (= gaps) | (legacy) |
+| Endpoint | Pipeline | Section filter | Expander | Frontend |
+|----------|----------|----------------|----------|----------|
+| `POST /analyze/gaps` | Gap synthesis — limitations, contradictions, research silences | `limitation`, `discussion`, `conclusion` | default | "Find Research Gaps" button |
+| `POST /analyze/toc` | Discussion ToC — hierarchical outline across papers | (unfiltered) | default | "Generate Discussion ToC" button |
+| `POST /analyze/methodologies` | Methodology synthesis — per-paper profiles + comparative matrix | `method`, `result` | default | "Synthesize Methodologies" button |
+| `POST /analyze/qa` | Grounded general Q&A — answers the user's actual question | (unfiltered) | neutral | (chat default, no button) |
+| `POST /analyze` | Deprecated alias → `/analyze/gaps` | (= gaps) | default | (legacy) |
 
-**Request body** (same for all four):
+**Request body** (same for all five):
 
 ```json
 {
@@ -215,6 +216,7 @@ The frontend hard-codes a predefined `query` per button:
 - gaps: `"Identify research gaps, limitations, and unresolved questions across these papers."`
 - toc: `"Generate a unified table of contents for a discussion synthesizing these papers."`
 - methodologies: `"Synthesize and compare the methodologies, datasets, and experimental setups used in these papers."`
+- qa: no button — the qa endpoint runs the same pipeline that `/chat` uses by default for grounded research questions. Send any natural-language question as `query`.
 
 **Response** (`AnalyzeResponse`, same for all four):
 
@@ -281,7 +283,7 @@ Accepts the full conversation, asks the LLM to classify the user's intent, then 
 }
 ```
 
-`pipeline` is one of `"gaps" | "toc" | "methodologies" | "text"`. For `"text"`, only `analysis` is populated. The classifier lives in `app/intelligence/router.py:decide` — it formats the whole conversation, asks the LLM for a two-field JSON object `{"pipeline": ..., "search_query": ...}`, and returns both. The `search_query` is a self-contained rewrite of the user's intent (resolving anaphora — e.g. "What about the methods?" after an earlier turn about transformer interpretability becomes `"transformer interpretability methods and evaluation"`); it's what the retriever actually runs against the corpus, and is echoed back as `query` in the response. Falls back to `("text", last_user_message)` on any parse failure or unknown label, so a malformed classifier output never breaks retrieval.
+`pipeline` is one of `"gaps" | "toc" | "methodologies" | "qa" | "text"`. For `"text"`, only `analysis` is populated; the other four populate the same shape as `AnalyzeResponse`. **`"qa"` is the default for any research question** that isn't an explicit gaps/toc/methodologies ask — it grounds the answer in the chunks just like the specialized pipelines, but uses a neutral query expansion and no section-type filter. The classifier lives in `app/intelligence/router.py:decide` — it formats the whole conversation, asks the LLM for a two-field JSON object `{"pipeline": ..., "search_query": ...}`, and returns both. The `search_query` is a self-contained rewrite of the user's intent (resolving anaphora — e.g. "What about the methods?" after an earlier turn about transformer interpretability becomes `"transformer interpretability methods and evaluation"`); it's what the retriever actually runs against the corpus, and is echoed back as `query` in the response. Falls back to `("text", last_user_message)` on any parse failure or unknown label, so a malformed classifier output never breaks retrieval.
 
 ### Health
 
@@ -417,4 +419,4 @@ chunks: id (UUID), position, text, section_title, section_type,
 
 - **Ahreum (Ingestion)**: Run `python3 scripts/load_jsonl.py chunked_results.jsonl` to load your data, or use `POST /chunks` directly
 - **Yerim (Intelligence)**: Your `expand_query_workflow` + `gap_synthesis_workflow` are now ported into `app/intelligence/`. Either run `scripts/run_pipeline.py "..."` or `from app.intelligence.pipeline import run_pipeline` — no HTTP needed.
-- **Matthias (UI)**: Four endpoints cover everything: `POST /analyze/gaps`, `POST /analyze/toc`, `POST /analyze/methodologies` (one per button — same `{query, top_k_per_query}` request and `AnalyzeResponse` shape), and `POST /chat` (full conversation in, `ChatResponse{pipeline, …}` out — `pipeline` tells you which renderer to use). The classifier behind `/chat` runs an LLM call on the conversation and picks one of `gaps | toc | methodologies | text`; `text` short-circuits past retrieval entirely (~4s response). Use `POST /search` if you want raw retrieval without the LLM step. Swagger UI at `/docs`. CORS pre-configured for ports 3000 / 5173 / 8080; override with `CORS_ORIGINS` env var. The old `POST /analyze` is kept as a deprecated alias for `/analyze/gaps` so nothing breaks while you migrate.
+- **Matthias (UI)**: Four endpoints cover the buttons + chat: `POST /analyze/gaps`, `POST /analyze/toc`, `POST /analyze/methodologies` (one per button — same `{query, top_k_per_query}` request and `AnalyzeResponse` shape), and `POST /chat` (full conversation in, `ChatResponse{pipeline, …}` out — `pipeline` tells you which renderer to use). A 5th endpoint `POST /analyze/qa` runs the chat's default grounded-Q&A pipeline outside of chat — no button drives it today, exposed for curl/Swagger and any future "ask a general question" surface. The classifier behind `/chat` runs an LLM call on the conversation and picks one of `gaps | toc | methodologies | qa | text`; `text` short-circuits past retrieval entirely (~4s response), `qa` is the default for any grounded research question. Use `POST /search` if you want raw retrieval without the LLM step. Swagger UI at `/docs`. CORS pre-configured for ports 3000 / 5173 / 8080; override with `CORS_ORIGINS` env var. The old `POST /analyze` is kept as a deprecated alias for `/analyze/gaps` so nothing breaks while you migrate.

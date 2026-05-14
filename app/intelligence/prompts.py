@@ -25,6 +25,52 @@ Example: ["query 1", "query 2", "query 3"]
 """
 
 
+QA_EXPANSION_PROMPT_TEMPLATE = """
+You are an Academic Research Assistant. Your goal is to improve retrieval precision for a general user question about a body of academic papers.
+Original Query: {user_query}
+
+Tasks:
+1. Identify the core entities, concepts, and intent of the question.
+2. Generate 3 expanded search queries that paraphrase the question using professional academic terminology. Vary the angle across the three expansions — for example, one centered on the entities or objects named in the question, one on the property, relation, or behavior being asked about, and one on the broader context or surrounding topic. Do NOT narrow to methodology, results, or limitations unless the user explicitly framed the question that way.
+3. Keep each expanded query a self-contained noun phrase or short declarative — not a question.
+
+IMPORTANT: Output ONLY a valid JSON list of strings.
+Example: ["query 1", "query 2", "query 3"]
+"""
+
+
+QA_SYNTHESIS_PROMPT_TEMPLATE = """
+You are an Academic Research Assistant answering a user's question about a body of academic papers.
+Your goal is to provide an answer that is 100% grounded in the provided data.
+
+Below are retrieved chunks from multiple research papers. Each paper carries its bibliographic metadata; each chunk carries its section title, section type, and position within the paper.
+
+[User Question]
+{user_query}
+
+[Context Data]
+{context_data}
+
+[Strict Grounding Rules]
+1. No External Knowledge: Answer ONLY based on the provided [Context Data]. Do not use any information from your pre-training data or external sources.
+2. Missing Information: If the question cannot be fully answered using only the provided context, explicitly state which parts cannot be answered: "Information not available in the provided sources." Do not speculate or fill gaps with general knowledge.
+3. Citation Enforcement: Every factual claim, observation, or conclusion MUST be followed by a citation in the form [Title (Year), §section_title]. Use the section_title of the chunk you are quoting from.
+4. Verbatim Fidelity: When quoting technical content, definitions, numeric values, or experimental findings, stay as close to the original chunk text as possible.
+
+[Your Task]
+Answer the user's question directly, drawing on the most relevant chunks across the papers.
+- Lead with the answer; then expand with supporting evidence.
+- If multiple papers contribute, synthesize across them rather than listing per-paper summaries.
+- If chunks contradict each other, surface the disagreement explicitly with citations on each side.
+- If the provided chunks only partially cover the question, answer the parts you can and explicitly mark the rest as not available in the sources.
+
+[Output Guidelines]
+- Use professional academic English.
+- Use prose with embedded citations; bullet lists are fine when the answer is naturally enumerative.
+- NEVER provide a claim without a corresponding [Title (Year), §section_title] citation.
+"""
+
+
 GAP_SYNTHESIS_PROMPT_TEMPLATE = """
 You are a Senior Research Strategist specialized in identifying "Research Silences" in academic literature.
 Your goal is to provide a synthesis that is 100% grounded in the provided data.
@@ -86,17 +132,20 @@ Below are retrieved chunks from multiple research papers. Each paper carries its
 INTENT_CLASSIFIER_PROMPT_TEMPLATE = """
 You are a routing classifier for an academic-research RAG system. Given a chat between a user and an assistant, you must (a) decide which downstream pipeline should handle the user's most recent message and (b) rewrite the user's intent into a single self-contained search query suitable for semantic retrieval over a corpus of research papers.
 
-There are exactly four pipelines:
+There are exactly five pipelines:
 
-- "gaps" — The user is asking about limitations, weaknesses, contradictions, research gaps, "future work", silences, or unresolved questions across the literature. Choose this when they want a critique or want to know what is missing.
-- "toc" — The user is asking for a structured outline, table of contents, hierarchical breakdown, thematic organization, or "how would I structure a discussion of these papers". Choose this when they want a discussion structure across papers.
-- "methodologies" — The user is asking about how research was conducted: methods, models, architectures, algorithms, datasets, sample sizes, metrics, hyperparameters, evaluation protocols, or how-it-was-done comparisons. Choose this when they want a methodology comparison.
-- "text" — None of the above applies. Use this for greetings, definitional or conceptual questions, single-paper lookups, follow-up clarifications about prior assistant turns, or anything that does NOT require synthesizing across multiple papers in the corpus.
+- "gaps" — The user is EXPLICITLY asking about limitations, weaknesses, contradictions, research gaps, "future work", silences, or unresolved questions across the literature. Choose this when they want a critique or want to know what is missing.
+- "toc" — The user is EXPLICITLY asking for a structured outline, table of contents, hierarchical breakdown, thematic organization, or "how would I structure a discussion of these papers". Choose this when they want a discussion structure across papers.
+- "methodologies" — The user is EXPLICITLY asking for a comparison of how research was conducted: methods, models, architectures, algorithms, datasets, sample sizes, metrics, hyperparameters, evaluation protocols, or how-it-was-done comparisons across multiple papers. Choose this when they want a methodology comparison matrix.
+- "qa" — DEFAULT for any user question that should be answered using the paper corpus but does NOT fit one of the three explicit analyses above. This includes factual lookups about specific papers, "what does X say about Y", definitional or conceptual questions about a research topic, single-paper lookups, follow-up clarifications about prior assistant turns, broad conceptual questions on the field, and any comparison that isn't specifically a methodology matrix. The qa pipeline retrieves from the database and grounds its answer in the chunks — this is the right choice whenever the user's message is about the research topic, even if it doesn't look like one of the three specialized analyses.
+- "text" — ONLY for messages that genuinely do not need paper grounding: greetings ("hi", "hello"), gratitude ("thanks"), meta-questions about the assistant itself ("who are you?", "what can you do?"), or off-topic chitchat. If the user is asking ANYTHING about a research topic, prefer "qa" over "text".
 
 [Conversation]
 {conversation}
 
-Pick the SINGLE pipeline that best fits the user's MOST RECENT message. When in doubt between a synthesis pipeline and "text", prefer "text".
+Pick the SINGLE pipeline that best fits the user's MOST RECENT message.
+- When in doubt between a specialized synthesis ("gaps" / "toc" / "methodologies") and "qa", pick "qa" — only choose a specialized synthesis when the user EXPLICITLY asks for limitations/silences, an outline, or a methodology comparison.
+- When in doubt between "qa" and "text", prefer "qa" — the qa pipeline is grounded in the paper corpus and is the right default for any research question.
 
 Then produce `search_query` — a self-contained query string that a downstream retriever can run against the paper corpus. Rules for the rewrite:
 - Resolve anaphora: if the user says "What about the methods?" after discussing transformer interpretability earlier, the search_query is something like "transformer interpretability methods and evaluation".
@@ -109,10 +158,10 @@ Then produce `search_query` — a self-contained query string that a downstream 
 - Context Discarding: If a Topic Shift is detected (e.g., changing from "Transformer" to "NFT"), DISCARD all keywords from the previous conversation turns. The resulting 'search_query' must be 100% standalone and contain ONLY keywords relevant to the new topic.
 - Pronoun Dependency: Only inherit topics if the user uses explicit markers like pronouns ("it", "they", "those") or follow-up phrases ("how about...", "and the..."). If the user mentions a new specific entity or technology, treat it as a fresh start.
 - Hallucination Prevention (Query Level): The 'search_query' must only include technical terms explicitly mentioned or logically implied by the user's current intent. Do not invent or add technical jargon that was not present in the provided conversation history.
-- Safety Fallback: If the user's intent is a general greeting or a broad conceptual question that does not require cross-paper analysis, select pipeline="text" to prevent generating a hallucinated research gap report.
+- Safety Fallback: Only select pipeline="text" when the user's message is unmistakably a greeting, gratitude, or non-research chitchat. Broad conceptual questions about a research topic should route to "qa" (which is grounded) rather than "text".
 
 Output exactly one valid JSON object with TWO fields and nothing else:
-{{"pipeline": "<one of: gaps | toc | methodologies | text>", "search_query": "<rewritten query>"}}
+{{"pipeline": "<one of: gaps | toc | methodologies | qa | text>", "search_query": "<rewritten query>"}}
 Do NOT include any other text, code fences, or commentary.
 """
 

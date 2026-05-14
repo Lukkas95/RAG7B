@@ -1,13 +1,16 @@
 """Intent-routed chat endpoint.
 
 `POST /chat` accepts the full conversation. `decide(messages)` returns both
-(a) one of {gaps, toc, methodologies, text} and (b) a self-contained
+(a) one of {gaps, toc, methodologies, qa, text} and (b) a self-contained
 `search_query` rewritten from the conversation (resolves anaphora /
 follow-ups). The route then dispatches:
 
   - "gaps"          → run_gaps_pipeline(search_query)
   - "toc"           → run_toc_pipeline(search_query)
   - "methodologies" → run_methodologies_pipeline(search_query)
+  - "qa"            → run_qa_pipeline(search_query)   (default for any
+                       grounded research question that isn't an explicit
+                       gaps/toc/methodologies ask)
   - "text"          → text_response(messages)   (LLM-only, no DB hit;
                        search_query is unused on this branch)
 

@@ -148,16 +148,16 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    """Returned by `POST /chat`. The four pipelines populate slightly different
+    """Returned by `POST /chat`. The five pipelines populate slightly different
     fields; the frontend can switch on `pipeline` to pick a renderer.
 
-    - For `pipeline in {"gaps", "toc", "methodologies"}` all of `query`,
+    - For `pipeline in {"gaps", "toc", "methodologies", "qa"}` all of `query`,
       `expanded_queries`, `papers`, and `analysis` are populated (same shape
       as `AnalyzeResponse`).
     - For `pipeline == "text"` only `analysis` is populated; `papers` is
       empty and `expanded_queries` is empty.
     """
-    pipeline: Literal["gaps", "toc", "methodologies", "text"]
+    pipeline: Literal["gaps", "toc", "methodologies", "qa", "text"]
     query: Optional[str] = None
     expanded_queries: List[str] = []
     papers: List[AnalyzePaper] = []

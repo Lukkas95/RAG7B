@@ -13,6 +13,8 @@ from app.intelligence.prompts import (
     EXPANSION_PROMPT_TEMPLATE,
     GAP_SYNTHESIS_PROMPT_TEMPLATE,
     METHODOLOGY_SYNTHESIS_PROMPT_TEMPLATE,
+    QA_EXPANSION_PROMPT_TEMPLATE,
+    QA_SYNTHESIS_PROMPT_TEMPLATE,
     TOC_SYNTHESIS_PROMPT_TEMPLATE,
 )
 
@@ -20,16 +22,14 @@ from app.intelligence.prompts import (
 async def expand_query(user_query: str) -> list[str]:
     """Turn one user query into 3 technical variations. Falls back to
     `[user_query]` if the LLM output can't be parsed as a JSON list."""
-    prompt = EXPANSION_PROMPT_TEMPLATE.format(user_query=user_query)
-    raw = await complete(prompt)
-    match = re.search(r"\[.*\]", raw, re.DOTALL)
-    if not match:
-        return [user_query]
-    try:
-        parsed = json.loads(match.group(0))
-        return [str(q) for q in parsed if isinstance(q, str)] or [user_query]
-    except (json.JSONDecodeError, TypeError):
-        return [user_query]
+    return await _expand(user_query, EXPANSION_PROMPT_TEMPLATE)
+
+
+async def general_expand_query(user_query: str) -> list[str]:
+    """Neutral variant of `expand_query` used by the qa pipeline. Same JSON
+    contract; the prompt does NOT bias toward methodology / results /
+    constraints, so it's a better fit for general grounded Q&A."""
+    return await _expand(user_query, QA_EXPANSION_PROMPT_TEMPLATE)
 
 
 async def gap_synthesis(papers: list[dict[str, Any]]) -> str:
@@ -45,6 +45,36 @@ async def toc_synthesis(papers: list[dict[str, Any]]) -> str:
 async def methodology_synthesis(papers: list[dict[str, Any]]) -> str:
     """Per-paper methodology profile + cross-paper comparative matrix."""
     return await _synthesize(papers, METHODOLOGY_SYNTHESIS_PROMPT_TEMPLATE)
+
+
+async def qa_synthesis(user_query: str, papers: list[dict[str, Any]]) -> str:
+    """Answer the user's actual question grounded in the provided papers.
+
+    Unlike the three fixed-task syntheses above, the qa prompt needs the
+    user's question as input (alongside the context), so this can't reuse
+    `_synthesize` — it formats {user_query} + {context_data} into
+    QA_SYNTHESIS_PROMPT_TEMPLATE directly.
+    """
+    if not papers:
+        return "Information not available in the provided sources."
+    context = "\n\n---\n\n".join(_format_paper(p) for p in papers)
+    prompt = QA_SYNTHESIS_PROMPT_TEMPLATE.format(
+        user_query=user_query, context_data=context
+    )
+    return await complete(prompt)
+
+
+async def _expand(user_query: str, template: str) -> list[str]:
+    prompt = template.format(user_query=user_query)
+    raw = await complete(prompt)
+    match = re.search(r"\[.*\]", raw, re.DOTALL)
+    if not match:
+        return [user_query]
+    try:
+        parsed = json.loads(match.group(0))
+        return [str(q) for q in parsed if isinstance(q, str)] or [user_query]
+    except (json.JSONDecodeError, TypeError):
+        return [user_query]
 
 
 async def _synthesize(papers: list[dict[str, Any]], template: str) -> str:

@@ -17,6 +17,7 @@ lines on top.
 `scripts/run_pipeline.py` keeps working unchanged.
 """
 import os
+from functools import partial
 from typing import Any, Awaitable, Callable, Optional
 
 import asyncio
@@ -25,7 +26,9 @@ from app.intelligence.llm import describe_backend
 from app.intelligence.workflows import (
     expand_query,
     gap_synthesis,
+    general_expand_query,
     methodology_synthesis,
+    qa_synthesis,
     toc_synthesis,
 )
 from app.retrieval import hybrid_search
@@ -37,6 +40,8 @@ GAPS_SECTION_TYPES: list[str] = ["limitation", "discussion", "conclusion"]
 # unfiltered — outline needs all sections
 TOC_SECTION_TYPES: Optional[list[str]] = None
 METHODOLOGY_SECTION_TYPES: list[str] = ["method", "result"]
+# qa runs unfiltered — answers can live in any section.
+QA_SECTION_TYPES: Optional[list[str]] = None
 
 # Back-compat: older code may still import this name.
 ANALYTICAL_SECTION_TYPES = GAPS_SECTION_TYPES
@@ -49,16 +54,19 @@ async def _collect_papers(
     min_distinct_papers: int,
     section_types: Optional[list[str]],
     log,
+    expander: Callable[[str], Awaitable[list[str]]] = expand_query,
 ) -> tuple[list[str], list[dict[str, Any]]]:
-    """Shared preamble for all three pipelines:
+    """Shared preamble for all retrieval pipelines:
 
-      expand_query → fan-out hybrid_search(section_types=…) → dedupe →
-      fallback unfiltered if <min_distinct_papers → group_by_paper.
+      expander(user_query) → fan-out hybrid_search(section_types=…) →
+      dedupe → fallback unfiltered if <min_distinct_papers → group_by_paper.
 
+    The three button pipelines use the default `expand_query` expander; the
+    qa pipeline passes `general_expand_query` for a neutral rewrite.
     Returns (expanded_queries, papers).
     """
     log("[pipeline] expanding query...")
-    expanded = await expand_query(user_query)
+    expanded = await expander(user_query)
     log(f"[pipeline] {len(expanded)} expanded queries: {expanded}")
 
     log(f"[pipeline] retrieving (filtered to {section_types})...")
@@ -104,6 +112,7 @@ async def _run(
     top_k_per_query: int,
     min_distinct_papers: int,
     verbose: bool,
+    expander: Callable[[str], Awaitable[list[str]]] = expand_query,
 ) -> dict[str, Any]:
     log = print if verbose else (lambda *a, **k: None)
     log(f"[pipeline:{pipeline_label}] backend={describe_backend()} | query={user_query!r}")
@@ -114,6 +123,7 @@ async def _run(
         min_distinct_papers=min_distinct_papers,
         section_types=section_types,
         log=log,
+        expander=expander,
     )
 
     log(f"[pipeline:{pipeline_label}] calling synthesis LLM...")
@@ -182,6 +192,33 @@ async def run_methodologies_pipeline(
         top_k_per_query=top_k_per_query,
         min_distinct_papers=min_distinct_papers,
         verbose=verbose,
+    )
+
+
+async def run_qa_pipeline(
+    user_query: str,
+    *,
+    top_k_per_query: int = 8,
+    min_distinct_papers: int = 0,
+    verbose: bool = True,
+) -> dict[str, Any]:
+    """Grounded general Q&A. Runs unfiltered retrieval with a neutral query
+    expansion, then asks the LLM to answer the user's actual question using
+    only the retrieved chunks. Used as the chat router's default for any
+    research question that isn't an explicit gaps/toc/methodologies ask.
+
+    `min_distinct_papers=0` because the unfiltered fallback in _collect_papers
+    would just re-run the same (already unfiltered) searches — no point.
+    """
+    return await _run(
+        user_query,
+        section_types=QA_SECTION_TYPES,
+        synthesizer=partial(qa_synthesis, user_query),
+        pipeline_label="qa",
+        top_k_per_query=top_k_per_query,
+        min_distinct_papers=min_distinct_papers,
+        verbose=verbose,
+        expander=general_expand_query,
     )
 
 

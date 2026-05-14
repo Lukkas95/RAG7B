@@ -32,19 +32,21 @@ from app.intelligence.llm import complete
 from app.intelligence.pipeline import (
     run_gaps_pipeline,
     run_methodologies_pipeline,
+    run_qa_pipeline,
     run_toc_pipeline,
 )
 from app.intelligence.prompts import INTENT_CLASSIFIER_PROMPT_TEMPLATE
 
 # Labels match the `pipeline` field in ChatResponse.
-PipelineLabel = str  # one of: "gaps" | "toc" | "methodologies" | "text"
-VALID_LABELS: set[str] = {"gaps", "toc", "methodologies", "text"}
+PipelineLabel = str  # one of: "gaps" | "toc" | "methodologies" | "qa" | "text"
+VALID_LABELS: set[str] = {"gaps", "toc", "methodologies", "qa", "text"}
 DEFAULT_LABEL: PipelineLabel = "text"
 
 PIPELINES: dict[str, Callable[..., Awaitable[dict[str, Any]]]] = {
     "gaps": run_gaps_pipeline,
     "toc": run_toc_pipeline,
     "methodologies": run_methodologies_pipeline,
+    "qa": run_qa_pipeline,
 }
 
 
